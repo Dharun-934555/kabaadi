@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KABADDI X - Multiplayer Arena</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #FF5722;
+            --secondary: #E91E63;
+            --bg-color: #121212;
+            --text-color: #ffffff;
+            --font-main: 'Roboto', sans-serif;
+            --font-head: 'Orbitron', sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Screens --- */
+        #login-screen, #lobby-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        #lobby-screen { display: none; }
+        #game-layer { display: none; width: 100%; height: 100%; }
+
+        .panel {
+            background: #1e1e1e;
+            padding: 40px;
+            border-radius: 10px;
+            border: 2px solid var(--primary);
+            box-shadow: 0 0 20px rgba(255, 87, 34, 0.5);
+            text-align: center;
+            min-width: 300px;
+        }
+
+        h1 { font-family: var(--font-head); font-size: 2.5rem; margin-bottom: 5px; }
+        h2 { color: #aaa; font-weight: normal; margin-bottom: 30px; }
+
+        input[type="text"] {
+            width: 90%;
+            padding: 10px;
+            margin: 10px 0;
+            background: #333;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 5px;
+            font-size: 1.2rem;
+            text-align: center;
+        }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-family: var(--font-head);
+            font-size: 1.2rem;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled { background: #555; cursor: not-allowed; }
+
+        /* Lobby specific */
+        .player-list {
+            margin: 20px 0;
+            text-align: left;
+            background: #111;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 100px;
+        }
+        .player-item {
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+        }
+        .voice-indicator { color: #4CAF50; font-size: 0.8rem; }
+        .host-badge { color: #ffeb3b; font-size: 0.8rem; border: 1px solid #ffeb3b; padding: 2px 5px; border-radius: 3px;}
+
+        .link-box {
+            background: #000;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            user-select: all;
+            margin-bottom: 20px;
+            border: 1px dashed #555;
+        }
+
+        /* Game basic styles */
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-grow: 1;
+            margin: 0 auto;
+        }
+
+        canvas {
+            background-color: #1e1e1e;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        /* Active Voice Chat Overlay inside game */
+        #voice-overlay {
+            position: absolute;
+            bottom: 20px; left: 20px;
+            background: rgba(0,0,0,0.6);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid rgba(76, 175, 80, 0.5);
+            z-index: 50;
+        }
+    </style>
+    
+    <!-- Dependencies -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div class="panel">
+            <h1>KABADDI X</h1>
+            <h2>Multiplayer Arena</h2>
+            
+            <input type="text" id="player-name" placeholder="Enter Your Name" maxlength="12">
+            <button class="btn" id="join-btn">JOIN GAME</button>
+            <div style="margin-top:15px; font-size:0.8rem; color:#888;">Microphone access will be requested for Voice Chat</div>
+        </div>
+    </div>
+
+    <!-- Lobby Screen -->
+    <div id="lobby-screen">
+        <div class="panel" style="max-width: 400px; width: 100%;">
+            <h1>SQUAD LOBBY</h1>
+            <h2>Room: <span id="room-code-display"></span></h2>
+            
+            <div style="font-size:0.9rem; color:#aaa; margin-bottom:5px;">Invite Friends Link:</div>
+            <div class="link-box" id="invite-link">http://localhost:3000/?room=XYZ</div>
+
+            <div class="player-list" id="player-list">
+                <!-- Players injected here -->
+            </div>
+
+            <button class="btn" id="start-match-btn" disabled>Waiting for Host...</button>
+        </div>
+    </div>
+
+    <!-- Game Layer -->
+    <div id="game-layer">
+        <div id="voice-overlay">
+            <div style="color:#4CAF50; font-weight:bold; margin-bottom:5px;">Voice Channel: LIVE</div>
+            <div id="voice-users" style="font-size:0.8rem; color:#aaa;">Connecting...</div>
+        </div>
+        <div id="game-container">
+            <canvas id="gameCanvas"></canvas>
+        </div>
+    </div>
+
+    <!-- Hidden audio elements for Voice Chat -->
+    <div id="audio-container" style="display:none;"></div>
+
+<script>
+    const socket = io();
+    let peer;
+    let localStream;
+    let myId;
+    let myName;
+    let roomCode;
+    let isHost = false;
+    let peers = {}; // tracking active calls
+    let players = {}; // tracking connected users
+
+    // Check URL for room code
+    const urlParams = new URLSearchParams(window.location.search);
+    roomCode = urlParams.get('room');
+    if(!roomCode) {
+        roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        window.history.replaceState({}, '', `?room=${roomCode}`);
+    }
+    
+    document.getElementById('room-code-display').innerText = roomCode;
+    document.getElementById('invite-link').innerText = window.location.href;
+
+    // --- UI Flow ---
+    document.getElementById('join-btn').addEventListener('click', async () => {
+        myName = document.getElementById('player-name').value.trim();
+        if(!myName) return alert("Please enter a name");
+        
+        document.getElementById('join-btn').innerText = "Connecting Voice...";
+        document.getElementById('join-btn').disabled = true;
+
+        try {
+            // Request Mic
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            
+            // Setup PeerJS for WebRTC
+            peer = new Peer(); 
+            peer.on('open', (id) => {
+                myId = id;
+                // Connect to Socket.io server
+                socket.emit('joinRoom', { roomCode, playerName: myName, peerId: myId });
+                
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('lobby-screen').style.display = 'flex';
+            });
+
+            // Handle incoming voice calls
+            peer.on('call', (call) => {
+                call.answer(localStream); // Answer with our mic
+                call.on('stream', (remoteStream) => addAudioStream(remoteStream, call.peer));
+                peers[call.peer] = call;
+            });
+
+        } catch (err) {
+            console.error("Mic error:", err);
+            alert("Microphone access is required for multiplayer voice chat!");
+            document.getElementById('join-btn').innerText = "JOIN GAME";
+            document.getElementById('join-btn').disabled = false;
+        }
+    });
+
+    // --- Socket Networking ---
+    socket.on('roomUpdate', (data) => {
+        players = data.players;
+        const hostId = data.hostId;
+        isHost = (socket.id === hostId);
+
+        updateLobbyUI();
+        
+        // Host controls start button
+        const startBtn = document.getElementById('start-match-btn');
+        if(isHost) {
+            startBtn.disabled = false;
+            startBtn.innerText = "START MATCH (Host)";
+        } else {
+            startBtn.disabled = true;
+            startBtn.innerText = "Waiting for Host...";
+        }
+
+        // Connect Voice to new peers we haven't called yet
+        Object.values(players).forEach(p => {
+            if(p.peerId && p.peerId !== myId && !peers[p.peerId]) {
+                const call = peer.call(p.peerId, localStream);
+                call.on('stream', (remoteStream) => addAudioStream(remoteStream, p.peerId));
+                peers[p.peerId] = call;
+            }
+        });
+    });
+
+    document.getElementById('start-match-btn').addEventListener('click', () => {
+        if(isHost) {
+            socket.emit('syncState', { action: 'START_GAME' });
+            startGameUI();
+        }
+    });
+
+    socket.on('gameState', (state) => {
+        if(state.action === 'START_GAME') {
+            startGameUI();
+        }
+        // * Future integration: render host physics positions here *
+    });
+
+    function updateLobbyUI() {
+        const list = document.getElementById('player-list');
+        list.innerHTML = '';
+        let voiceUsers = [];
+        
+        Object.values(players).forEach(p => {
+            const isMe = p.id === socket.id;
+            const isH = p.id === players[Object.keys(players)[0]].id; // rough host check
+            
+            voiceUsers.push(p.name);
+
+            list.innerHTML += `
+                <div class="player-item">
+                    <span>${p.name} ${isMe ? '(You)' : ''}</span>
+                    <div>
+                        <span class="voice-indicator">🎤 Live</span>
+                        ${isH ? '<span class="host-badge">HOST</span>' : ''}
+                    </div>
+                </div>
+            `;
+        });
+        
+        document.getElementById('voice-users').innerText = voiceUsers.join(', ');
+    }
+
+    function addAudioStream(stream, peerId) {
+        if(document.getElementById(`audio-${peerId}`)) return;
+        const audio = document.createElement('audio');
+        audio.id = `audio-${peerId}`;
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        document.getElementById('audio-container').appendChild(audio);
+    }
+
+    // --- Game Graphics (Placeholder for full sync) ---
+    let canvas, ctx;
+    function startGameUI() {
+        document.getElementById('lobby-screen').style.display = 'none';
+        document.getElementById('game-layer').style.display = 'block';
+        
+        canvas = document.getElementById('gameCanvas');
+        ctx = canvas.getContext('2d');
+        resize();
+        window.addEventListener('resize', resize);
+        
+        // Simple loop to draw court
+        requestAnimationFrame(renderLoop);
+    }
+
+    function resize() {
+        const container = document.getElementById('game-container');
+        canvas.width = 1000;
+        canvas.height = canvas.width / (9/5);
+        canvas.style.width = '100%';
+        canvas.style.maxWidth = '1000px';
+    }
+
+    function renderLoop() {
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        
+        // Draw Basic Court
+        ctx.fillStyle = "#1e1e1e";
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        
+        ctx.strokeStyle = "rgba(255,255,255,0.4)";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(50, 50, canvas.width-100, canvas.height-100);
+        
+        ctx.beginPath();
+        ctx.moveTo(canvas.width/2, 50);
+        ctx.lineTo(canvas.width/2, canvas.height-50);
+        ctx.stroke();
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "20px Orbitron";
+        ctx.textAlign = "center";
+        ctx.fillText("Multiplayer Server Synced!", canvas.width/2, 30);
+        ctx.fillText("Voice chat is active. Talk to your friends!", canvas.width/2, canvas.height/2);
+
+        requestAnimationFrame(renderLoop);
+    }
+
+</script>
+</body>
+</html>
